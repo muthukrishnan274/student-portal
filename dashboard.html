@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Dashboard - Placement Portal</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="brand">🎓 Placement Portal</div>
+    <div class="nav-right">
+      <span id="welcomeMsg"></span>
+      <button id="logoutBtn" class="btn-outline">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="tabs-row">
+      <button class="tab-btn active" data-tab="profileTab">Profile</button>
+      <button class="tab-btn" data-tab="listingsTab">Listings</button>
+      <button class="tab-btn" data-tab="statusTab">Application Status</button>
+    </div>
+
+    <!-- PROFILE -->
+    <div id="profileTab" class="tab-content active card">
+      <h2>My Profile</h2>
+      <form id="profileForm">
+        <label>Full Name</label>
+        <input type="text" id="pName" required>
+        <label>Email</label>
+        <input type="email" id="pEmail" disabled>
+        <label>Phone</label>
+        <input type="tel" id="pPhone" required>
+        <label>Course / Branch</label>
+        <input type="text" id="pCourse" required>
+        <label>Resume (PDF/DOC)</label>
+        <input type="file" id="pResume" accept=".pdf,.doc,.docx">
+        <p id="resumeName" class="hint"></p>
+        <button type="submit" class="btn-primary">Save Profile</button>
+      </form>
+      <p id="profileMsg" class="msg"></p>
+    </div>
+
+    <!-- LISTINGS -->
+    <div id="listingsTab" class="tab-content card">
+      <h2>Internship & Job Listings</h2>
+      <div class="filters">
+        <input type="text" id="searchInput" placeholder="Search by title or company...">
+        <select id="typeFilter">
+          <option value="">All Types</option>
+          <option value="Internship">Internship</option>
+          <option value="Job">Job</option>
+        </select>
+        <select id="locationFilter">
+          <option value="">All Locations</option>
+        </select>
+      </div>
+      <div id="listingsGrid" class="grid"></div>
+    </div>
+
+    <!-- STATUS -->
+    <div id="statusTab" class="tab-content card">
+      <h2>My Applications</h2>
+      <div id="statusList"></div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script>
+    const user = requireStudentSession();
+
+    document.querySelectorAll('.tabs-row .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tabs-row .tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+        if(btn.dataset.tab === 'listingsTab') renderListings();
+        if(btn.dataset.tab === 'statusTab') renderStatus();
+      });
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      clearSession();
+      window.location.href = 'index.html';
+    });
+
+    // Load profile
+    welcomeMsg.textContent = 'Hi, ' + user.name;
+    pName.value = user.name;
+    pEmail.value = user.email;
+    pPhone.value = user.phone;
+    pCourse.value = user.course;
+    if(user.resumeName) resumeName.textContent = 'Current resume: ' + user.resumeName;
+
+    let newResumeData = null, newResumeName = null;
+    pResume.addEventListener('change', function(){
+      const file = this.files[0];
+      if(!file) return;
+      newResumeName = file.name;
+      const reader = new FileReader();
+      reader.onload = e => { newResumeData = e.target.result; };
+      reader.readAsDataURL(file);
+      resumeName.textContent = 'Selected: ' + file.name;
+    });
+
+    profileForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      updateStudent(user.id, {
+        name: pName.value, phone: pPhone.value, course: pCourse.value,
+        resumeName: newResumeName || user.resumeName,
+        resumeData: newResumeData || user.resumeData
+      });
+      profileMsg.textContent = 'Profile saved successfully!';
+      profileMsg.className = 'msg success';
+      welcomeMsg.textContent = 'Hi, ' + pName.value;
+    });
+
+    // Listings
+    function populateLocationFilter(){
+      const jobs = getJobs();
+      const locs = [...new Set(jobs.map(j => j.location))];
+      locationFilter.innerHTML = '<option value="">All Locations</option>' +
+        locs.map(l => `<option value="${l}">${l}</option>`).join('');
+    }
+
+    function renderListings(){
+      populateLocationFilter();
+      const q = searchInput.value.toLowerCase();
+      const type = typeFilter.value;
+      const loc = locationFilter.value;
+      const jobs = getJobs().filter(j =>
+        (j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)) &&
+        (!type || j.type === type) &&
+        (!loc || j.location === loc)
+      );
+      const myApps = getApplications().filter(a => a.studentId === user.id);
+      listingsGrid.innerHTML = jobs.length ? jobs.map(j => {
+        const applied = myApps.find(a => a.jobId === j.id);
+        return `<div class="job-card">
+          <span class="badge">${j.type}</span>
+          <h3>${j.title}</h3>
+          <p class="company">${j.company} &middot; ${j.location}</p>
+          <p class="desc">${j.description}</p>
+          ${applied
+            ? `<button class="btn-outline" disabled>Applied (${applied.status})</button>`
+            : `<button class="btn-primary apply-btn" data-id="${j.id}">Apply</button>`}
+        </div>`;
+      }).join('') : '<p class="hint">No listings match your search.</p>';
+
+      document.querySelectorAll('.apply-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if(!user.resumeName){
+            alert('Please upload your resume in Profile before applying.');
+            return;
+          }
+          applyToJob(user.id, btn.dataset.id);
+          renderListings();
+        });
+      });
+    }
+
+    [searchInput, typeFilter, locationFilter].forEach(el =>
+      el.addEventListener('input', renderListings));
+
+    function renderStatus(){
+      const myApps = getApplications().filter(a => a.studentId === user.id);
+      const jobs = getJobs();
+      statusList.innerHTML = myApps.length ? myApps.map(a => {
+        const job = jobs.find(j => j.id === a.jobId) || {};
+        return `<div class="status-row">
+          <div>
+            <strong>${job.title || 'Deleted listing'}</strong>
+            <p class="hint">${job.company || ''} &middot; Applied on ${a.appliedDate}</p>
+          </div>
+          <span class="status-pill status-${a.status.toLowerCase()}">${a.status}</span>
+        </div>`;
+      }).join('') : '<p class="hint">You have not applied to anything yet.</p>';
+    }
+
+    renderListings();
+  </script>
+</body>
+</html>
